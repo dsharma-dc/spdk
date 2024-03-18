@@ -445,6 +445,12 @@ bdev_blob_is_zeroes(struct spdk_bs_dev *dev, uint64_t lba, uint64_t lba_count)
 }
 
 static bool
+bdev_blob_within_blob(struct spdk_bs_dev *dev, uint64_t lba, uint64_t lba_count)
+{
+	return false;
+}
+
+static bool
 bdev_blob_translate_lba(struct spdk_bs_dev *dev, uint64_t lba, uint64_t *base_lba)
 {
 	*base_lba = lba;
@@ -479,6 +485,7 @@ blob_bdev_init(struct blob_bdev *b, struct spdk_bdev_desc *desc)
 	}
 	b->bs_dev.get_base_bdev = bdev_blob_get_base_bdev;
 	b->bs_dev.is_zeroes = bdev_blob_is_zeroes;
+	b->bs_dev.within_blob = bdev_blob_within_blob;
 	b->bs_dev.translate_lba = bdev_blob_translate_lba;
 }
 

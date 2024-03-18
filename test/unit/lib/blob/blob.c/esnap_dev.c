@@ -222,6 +222,12 @@ ut_esnap_is_zeroes(struct spdk_bs_dev *dev, uint64_t lba, uint64_t lba_count)
 	return false;
 }
 
+static bool
+ut_esnap_within_blob(struct spdk_bs_dev *dev, uint64_t lba, uint64_t lba_count)
+{
+	return false;
+}
+
 static int
 ut_esnap_io_channel_create(void *io_device, void *ctx)
 {
@@ -305,6 +311,7 @@ ut_esnap_dev_alloc(const struct ut_esnap_opts *opts)
 	bs_dev->readv = ut_esnap_readv;
 	bs_dev->readv_ext = ut_esnap_readv_ext;
 	bs_dev->is_zeroes = ut_esnap_is_zeroes;
+	bs_dev->within_blob = ut_esnap_within_blob;
 	bs_dev->translate_lba = ut_esnap_translate_lba;
 
 	spdk_io_device_register(ut_dev, ut_esnap_io_channel_create, ut_esnap_io_channel_destroy,

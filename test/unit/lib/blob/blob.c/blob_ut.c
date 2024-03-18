@@ -8951,6 +8951,107 @@ blob_is_degraded(void)
 	g_blob->back_bs_dev = NULL;
 }
 
+/* Resize a blob which is a clone created from snapshot. Verify read/writes to
+ * expanded clone blob. Then inflate the clone blob. */
+static void
+blob_clone_resize(void)
+{
+	struct spdk_blob_store *bs = g_bs;
+	struct spdk_blob_opts opts;
+	struct spdk_blob *blob, *clone;
+	spdk_blob_id blobid, cloneid, snapshotid;
+	uint64_t pages_per_cluster;
+	uint8_t payload_read[bs->dev->blocklen];
+	uint8_t payload_write[bs->dev->blocklen];
+	struct spdk_io_channel *channel;
+	uint64_t free_clusters;
+
+	channel = spdk_bs_alloc_io_channel(bs);
+	SPDK_CU_ASSERT_FATAL(channel != NULL);
+
+	pages_per_cluster = spdk_bs_get_cluster_size(bs) / spdk_bs_get_page_size(bs);
+
+	/* Create blob with 10 clusters */
+	ut_spdk_blob_opts_init(&opts);
+	opts.num_clusters = 10;
+
+	blob = ut_blob_create_and_open(bs, &opts);
+	blobid = spdk_blob_get_id(blob);
+	CU_ASSERT(spdk_blob_get_num_clusters(blob) == 10);
+
+	/* Create snapshot */
+	spdk_bs_create_snapshot(bs, blobid, NULL, blob_op_with_id_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(g_blobid != SPDK_BLOBID_INVALID);
+	snapshotid = g_blobid;
+
+	spdk_bs_create_clone(bs, snapshotid, NULL, blob_op_with_id_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(g_blobid != SPDK_BLOBID_INVALID);
+	cloneid = g_blobid;
+
+	spdk_bs_open_blob(bs, cloneid, blob_op_with_handle_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	SPDK_CU_ASSERT_FATAL(g_blob != NULL);
+	clone = g_blob;
+	CU_ASSERT(spdk_blob_get_num_clusters(clone) == 10);
+
+	g_bserrno = -1;
+	spdk_blob_resize(clone, 20, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(spdk_blob_get_num_clusters(clone) == 20);
+
+	/* Write and read from pre-resize ranges */
+	g_bserrno = -1;
+	memset(payload_write, 0xE5, sizeof(payload_write));
+	spdk_blob_io_write(clone, channel, payload_write, 5 * pages_per_cluster, 1, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+
+	g_bserrno = -1;
+	memset(payload_read, 0x00, sizeof(payload_read));
+	spdk_blob_io_read(clone, channel, payload_read, 5 * pages_per_cluster, 1, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(memcmp(payload_write, payload_read, 4096) == 0);
+
+	/* Write and read from post-resize ranges */
+	g_bserrno = -1;
+	memset(payload_write, 0xE5, sizeof(payload_write));
+	spdk_blob_io_write(clone, channel, payload_write, 15 * pages_per_cluster, 1, blob_op_complete,
+			   NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+
+	g_bserrno = -1;
+	memset(payload_read, 0x00, sizeof(payload_read));
+	spdk_blob_io_read(clone, channel, payload_read, 15 * pages_per_cluster, 1, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	CU_ASSERT(memcmp(payload_write, payload_read, bs->dev->blocklen) == 0);
+
+	/* Now do full blob inflation of the resized blob/clone. */
+	free_clusters = spdk_bs_free_cluster_count(bs);
+	spdk_bs_inflate_blob(bs, channel, cloneid, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+	/* We wrote to 2 clusters earlier, all remaining 18 clusters in
+	 * blob should get allocated after inflation */
+	CU_ASSERT(spdk_bs_free_cluster_count(bs) == free_clusters - 18);
+
+	spdk_blob_close(clone, blob_op_complete, NULL);
+	poll_threads();
+	CU_ASSERT(g_bserrno == 0);
+
+	ut_blob_close_and_delete(bs, blob);
+
+	spdk_bs_free_io_channel(channel);
+}
+
 static void
 suite_bs_setup(void)
 {
@@ -9224,6 +9325,7 @@ main(int argc, char **argv)
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_clone_reload);
 		CU_ADD_TEST(suite_esnap_bs, blob_esnap_hotplug);
 		CU_ADD_TEST(suite_blob, blob_is_degraded);
+		CU_ADD_TEST(suite_bs, blob_clone_resize);
 	}
 
 	allocate_threads(2);

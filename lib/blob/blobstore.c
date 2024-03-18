@@ -2685,6 +2685,7 @@ bs_allocate_and_copy_cluster(struct spdk_blob *blob,
 	uint32_t cluster_number;
 	bool is_zeroes;
 	bool can_copy;
+	bool in_blob_bounds = true;
 	uint64_t copy_src_lba;
 	int rc;
 
@@ -2717,11 +2718,20 @@ bs_allocate_and_copy_cluster(struct spdk_blob *blob,
 	ctx->page = cluster_start_page;
 	ctx->new_cluster_page = ch->new_cluster_page;
 	memset(ctx->new_cluster_page, 0, SPDK_BS_PAGE_SIZE);
-	can_copy = blob_can_copy(blob, cluster_start_page, &copy_src_lba);
 
-	is_zeroes = blob->back_bs_dev->is_zeroes(blob->back_bs_dev,
+	/* For SPDK_BLOBID_INVALID indicating zeroes dev, bounds will be always contained. */
+	if (blob->id != SPDK_BLOBID_INVALID) {
+		in_blob_bounds = blob->back_bs_dev->within_blob(blob->back_bs_dev,
+					bs_dev_page_to_lba(blob->back_bs_dev, cluster_start_page),
+					bs_dev_byte_to_lba(blob->back_bs_dev, blob->bs->cluster_sz));
+	}
+
+	can_copy = in_blob_bounds && blob_can_copy(blob, cluster_start_page, &copy_src_lba);
+
+	is_zeroes = in_blob_bounds && blob->back_bs_dev->is_zeroes(blob->back_bs_dev,
 			bs_dev_page_to_lba(blob->back_bs_dev, cluster_start_page),
 			bs_dev_byte_to_lba(blob->back_bs_dev, blob->bs->cluster_sz));
+
 	if (blob->parent_id != SPDK_BLOBID_INVALID && !is_zeroes && !can_copy) {
 		ctx->buf = spdk_malloc(blob->bs->cluster_sz, blob->back_bs_dev->blocklen,
 				       NULL, SPDK_ENV_SOCKET_ID_ANY, SPDK_MALLOC_DMA);

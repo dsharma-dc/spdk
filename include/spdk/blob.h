@@ -230,6 +230,8 @@ struct spdk_bs_dev {
 	struct spdk_bdev *(*get_base_bdev)(struct spdk_bs_dev *dev);
 
 	bool (*is_zeroes)(struct spdk_bs_dev *dev, uint64_t lba, uint64_t lba_count);
+	/* Is the cluster we are looking for within the blob's cluster range or not */
+	bool (*within_blob)(struct spdk_bs_dev *dev, uint64_t lba, uint64_t lba_count);
 
 	/* Translate blob lba to lba on the underlying bdev.
 	 * This operation recurses down the whole chain of bs_dev's.
